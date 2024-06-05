@@ -18,8 +18,13 @@ fi
 #~CHECK FOR YQ~
 if ! command -v yq &> /dev/null; then
     gum style --foreground 3 "Installing yq..."
-    wget https://github.com/mikefarah/yq/releases/download/3.4.1/yq_linux_amd64 -O /usr/bin/yq
+    wget https://github.com/mikefarah/yq/releases/download/v4.16.1/yq_linux_amd64 -O /usr/bin/yq
     chmod +x /usr/bin/yq
+fi
+#~CHECK FOR NETCAT~
+if ! command -v nc &> /dev/null; then
+    gum style --foreground 3 "Installing netcat (nc)..."
+    sudo apt update && sudo apt install -y netcat
 fi
 #~CHECK FOR FILE WITH DIR~
 if [ -f "saved_directory.txt" ]; then
@@ -40,33 +45,38 @@ check_nonweb_service() {
 
 # ~OUTPUT SERVICE NAME AND DIRS IN TABLE~
 show_services() {
-    gum style --foreground 5 "Services:"
-    gum style --border normal --padding "1 2" --margin "1" --width 50 <<EOF
+    gum style --border normal --padding "1 2" --margin "1" --width 50 --align center --border-foreground 4 "Services:"
+    gum style --border none --padding "1 2" --margin "1" --width 50 <<EOF
 $(for service in $(find $DIRECTORY -mindepth 1 -maxdepth 1 -type d); do
     service_name=$(basename $service)
-    docker_compose_file=""
-    
-    for file in "$service/docker-compose.yml" "$service/docker-compose.yaml" "$service/compose.yml" "$service/compose.yaml"; do
-        [ -f "$file" ] && docker_compose_file=$file && break
-    done
+    docker_compose_files=$(find $service -name "docker-compose.yml" -o -name "docker-compose.yaml" -o -name "compose.yml" -o -name "compose.yaml")
 
-    if [ ! -z "$docker_compose_file" ]; then
-        port=$(yq r "$docker_compose_file" 'services.*.ports[0]' | cut -d':' -f1)
-        if [ -n "$port" ]; then
-            if curl -s localhost:$port >/dev/null 2>&1; then
-                service_type=$(check_web_service $port)
-                echo "Service Name: $service_name, Port: $port, Service Type: $service_type"
-                echo "http://vuln:$port"
-            else
-                service_type=$(check_nonweb_service $port)
-                [ "$service_type" != "Unknown Service" ] && echo "Service Name: $service_name, Port: $port, Service Type: $service_type" && echo "\`\`\`nc vuln $port \`\`\`"
-            fi
+    if [ -n "$docker_compose_files" ]; then
+        ports=$(yq eval '..|.ports? | select(. != null) | .[]' $docker_compose_files | grep -oE '[0-9]+' | sort | uniq)
+
+        if [ -n "$ports" ]; then
+            for port in $ports; do
+                if curl -s localhost:$port >/dev/null 2>&1; then
+                    service_type=$(check_web_service $port)
+                    gum style --foreground 2 "Service Name: $service_name, Port: $port, Service Type: $service_type"
+                    gum style --foreground 6 "[http://vuln:$port](http://vuln:$port)"
+                else
+                    service_type=$(check_nonweb_service $port)
+                    if [ "$service_type" != "Unknown Service" ] && [ "$service_type" != "Port number is missing" ]; then
+                        gum style --foreground 3 "Service Name: $service_name, Port: $port, Service Type: $service_type"
+                        gum style --foreground 6 "\`\`\`nc vuln $port\`\`\`"
+                    else
+                        gum style --foreground 1 "Service Name: $service_name, Port: $port, Service Type: $service_type"
+                    fi
+                fi
+            done
         else
-            echo "Service Name: $service_name, Port number is missing"
+            gum style --foreground 1 "Service Name: $service_name, Port number is missing"
         fi
     else
-        echo "Service Name: $service_name, Docker Compose file not found"
+        gum style --foreground 1 "Service Name: $service_name, Docker Compose file not found"
     fi
+    echo
 done)
 EOF
 }
