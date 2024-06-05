@@ -1,27 +1,22 @@
 #!/usr/bin/env bash
 
-# ----------------------------------
-#-COLORZ-
-# ----------------------------------
-NOCOLOR='\033[0m'
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-ORANGE='\033[0;33m'
-BLUE='\033[0;34m'
-PURPLE='\033[0;35m'
-CYAN='\033[0;36m'
-LIGHTGRAY='\033[0;37m'
-DARKGRAY='\033[1;30m'
-LIGHTRED='\033[1;31m'
-LIGHTGREEN='\033[1;32m'
-YELLOW='\033[1;33m'
-LIGHTBLUE='\033[1;34m'
-LIGHTPURPLE='\033[1;35m'
-LIGHTCYAN='\033[1;36m'
-WHITE='\033[1;37m'
+#~INSTALL GUM~
+echo " "
+if ! command -v gum &> /dev/null
+then
+    gum style --foreground 2 "gum not found, installing gum..."
+    sudo apt update && sudo apt install -y gum
+    if ! command -v gum &> /dev/null
+    then
+        gum style --foreground 1 "Failed to install gum. Please install it manually."
+        exit 1
+    fi
+    gum style --foreground 2 "gum installed successfully."
+fi
 
 #~CHECK FOR YQ~
 if ! command -v yq &> /dev/null; then
+    gum style --foreground 3 "Installing yq..."
     wget https://github.com/mikefarah/yq/releases/download/3.4.1/yq_linux_amd64 -O /usr/bin/yq
     chmod +x /usr/bin/yq
 fi
@@ -32,100 +27,71 @@ fi
 
 # ~WEB-SERVICE TYPE CHECK~
 check_web_service() {
-    response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:$1)
-    if [ $response -eq 200 ]; then
-        echo "Web Service"
-    else
-        echo "Unknown Service"
-    fi
+    local response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:$1)
+    [ $response -eq 200 ] && echo "Web Service" || echo "Unknown Service"
 }
 
 # ~NON-WEB-SERVICE TYPE CHECK~
 check_nonweb_service() {
-    if [ -z "$1" ]; then
-        echo "Port number is missing."
-        return
-    fi
-    if nc -z localhost $1 </dev/null; then
-        echo "Non-Web Service"
-    else
-        echo "Unknown Service"
-    fi
+    [ -z "$1" ] && echo "Port number is missing." && return
+    nc -z localhost $1 </dev/null && echo "Non-Web Service" || echo "Unknown Service"
 }
 
 # ~OUTPUT SERVICE NAME AND DIRS IN TABLE~
 show_services() {
-    clear
-    echo "Services:"
-    echo "-----------------------------------------"
-    for service in $(find $DIRECTORY -mindepth 1 -maxdepth 1 -type d); do
-        service_name=$(basename $service)
-        docker_compose_file=""
+    gum style --foreground 5 "Services:"
+    gum style --border normal --padding "1 2" --margin "1" --width 50 <<EOF
+$(for service in $(find $DIRECTORY -mindepth 1 -maxdepth 1 -type d); do
+    service_name=$(basename $service)
+    docker_compose_file=""
+    
+    for file in "$service/docker-compose.yml" "$service/docker-compose.yaml" "$service/compose.yml" "$service/compose.yaml"; do
+        [ -f "$file" ] && docker_compose_file=$file && break
+    done
 
-        for file in "$service/docker-compose.yml" "$service/docker-compose.yaml" "$service/compose.yml" "$service/compose.yaml"; do
-            if [ -f "$file" ]; then
-                docker_compose_file=$file
-                break
-            fi
-        done
-
-        if [ ! -z "$docker_compose_file" ]; then
-            port=$(cat "$docker_compose_file" | yq r - 'services.*.ports[0]' | cut -d':' -f1)
-            if [ -n "$port" ]; then
-                if curl -s localhost:$port >/dev/null 2>&1; then
-                    service_type=$(check_web_service)
-                    printf "Service Name: $service_name, Port: $port, Service Type: ${LIGHTBLUE}$service_type${NOCOLOR}"
-                    echo " "
-		            echo "http://vuln:$port"
-                else
-                    service_type=$(check_nonweb_service $port)
-                    if [ "$service_type" != "Unknown Service" ] && [ "$service_type" != "Port number is missing" ]; then
-                        printf "Service Name: $service_name, Port: $port, Service Type: ${YELLOW}$service_type${NOCOLOR}"
-                        echo " "
-			            echo "\`\`\`nc vuln $port \`\`\`"
-                    else
-                        printf "Service Name: $service_name, Port: $port, Service Type: ${RED}$service_type${NOCOLOR}"
-                    fi
-                fi
-                echo
+    if [ ! -z "$docker_compose_file" ]; then
+        port=$(yq r "$docker_compose_file" 'services.*.ports[0]' | cut -d':' -f1)
+        if [ -n "$port" ]; then
+            if curl -s localhost:$port >/dev/null 2>&1; then
+                service_type=$(check_web_service $port)
+                echo "Service Name: $service_name, Port: $port, Service Type: $service_type"
+                echo "http://vuln:$port"
             else
-                echo "Service Name: $service_name, Port number is missing"
-                echo
+                service_type=$(check_nonweb_service $port)
+                [ "$service_type" != "Unknown Service" ] && echo "Service Name: $service_name, Port: $port, Service Type: $service_type" && echo "\`\`\`nc vuln $port \`\`\`"
             fi
         else
-            echo "Service Name: $service_name, Docker Compose file not found"
-            echo
+            echo "Service Name: $service_name, Port number is missing"
         fi
-    done
-    echo "-----------------------------------------"
-    echo
+    else
+        echo "Service Name: $service_name, Docker Compose file not found"
+    fi
+done)
+EOF
 }
-
 
 # ~ARCHIVE~
 archive_services() {
-    clear
     tar -czvf services_backup.tar.gz $DIRECTORY/*/
-    printf "${GREEN}All services have been archived successfully.${NOCOLOR}"
+    gum style --foreground 2 "All services have been archived successfully."
 }
 
 # ~SAVE DIR~
 save_directory() {
     echo $DIRECTORY > saved_directory.txt
-    printf "${GREEN}Current directory has been saved.${NOCOLOR}"
+    gum style --foreground 2 "Current directory has been saved."
 }
 
 # ~DELETE DATA ABOUT DIR~
 delete_data() {
     rm -f saved_directory.txt
-    printf "${GREEN}All saved data have been deleted.${NOCOLOR}"
+    gum style --foreground 2 "All saved data have been deleted."
 }
 
 # ~CHANGE DIR~
 edit_directory() {
-    read -p "Enter the new directory path: " new_directory
-    DIRECTORY=$new_directory
-    printf "${GREEN}Directory has been updated successfully.${NOCOLOR}"
+    DIRECTORY=$(gum input --placeholder "Enter the new directory path")
+    gum style --foreground 2 "Directory has been updated successfully."
 }
 
 
@@ -154,43 +120,25 @@ cat << "EOF"
                                     [yuyu]
                                   [893crew~]
 EOF
-    echo "[ Service Management Script ]"
-    echo "1. Show Services"
-    echo "2. Archive Services"
-    echo "3. Save Current Directory"
-    echo "4. Delete All Saved Data"
-    echo "5. Edit Directory"
-    echo "6. Exit"
-    read -p "" choice
+    gum style --border normal --padding "1 2" --margin "1" --width 50 --align center --border-foreground 4 <<EOF
+Service Management Script
+=========================
+1. Show Services
+2. Archive Services
+3. Save Current Directory
+4. Delete All Saved Data
+5. Edit Directory
+6. Exit
+EOF
+    choice=$(gum input --placeholder "Enter your choice")
 
     case $choice in
-        1)
-            show_services
-            read -p "Press enter to continue..."
-            ;;
-        2)
-            archive_services
-            read -p "Press enter to continue..."
-            ;;
-        3)
-            save_directory
-            read -p "Press enter to continue..."
-            ;;
-        4)
-            delete_data
-            read -p "Press enter to continue..."
-            ;;
-        5)
-            edit_directory
-            read -p "Press enter to continue..."
-            ;;
-        6)
-            echo "Exiting the script. Goodbye!"
-            exit 0
-            ;;
-        *)
-            echo "Invalid option. Please choose again."
-            read -p "Press enter to continue..."
-            ;;
+        1) show_services; gum style --foreground 2 "Press enter to continue..." && read ;;
+        2) archive_services; gum style --foreground 2 "Press enter to continue..." && read ;;
+        3) save_directory; gum style --foreground 2 "Press enter to continue..." && read ;;
+        4) delete_data; gum style --foreground 2 "Press enter to continue..." && read ;;
+        5) edit_directory; gum style --foreground 2 "Press enter to continue..." && read ;;
+        6) gum style --foreground 2 "Exiting the script. Goodbye!"; exit 0 ;;
+        *) gum style --foreground 1 "Invalid option. Please choose again."; gum style --foreground 2 "Press enter to continue..." && read ;;
     esac
 done
